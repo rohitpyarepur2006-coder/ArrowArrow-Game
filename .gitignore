@@ -7,5 +7,11 @@ venv/
 .idea/
 .vscode/
 .pytest_cache/
+# 游戏进度存档（本地数据）
+save.json
+# PyInstaller 打包产物
+dist/
+build/
+*.spec
 # 作业说明文档不进入仓库
 软工作业2.docx
