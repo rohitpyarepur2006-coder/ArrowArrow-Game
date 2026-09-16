@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.idea/
+.vscode/
+.pytest_cache/
+# 作业说明文档不进入仓库
+软工作业2.docx

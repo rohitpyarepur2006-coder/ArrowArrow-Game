@@ -1,0 +1,3 @@
+pygame>=2.5
+# 仅生成演示 GIF（tools/make_screenshots.py）时需要：
+pillow>=10.0
