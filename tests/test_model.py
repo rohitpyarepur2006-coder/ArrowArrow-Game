@@ -4,11 +4,13 @@
     python -m unittest discover -s tests -v
 """
 
+import random
 import unittest
 
 from game.levels import LEVELS, MAX_MISTAKES
 from game.model import (Arrow, Game, LaunchResult, Level,
-                        find_blocker, solve,
+                        compute_score, find_blocker, generate_random_level,
+                        solve, stars_for,
                         DOWN, LEFT, RIGHT, UP)
 
 
@@ -150,6 +152,104 @@ class SolvabilityTest(unittest.TestCase):
         hint = game.next_hint()
         self.assertIsNotNone(hint)
         self.assertEqual(hint, Arrow(0, 3, DOWN))
+
+
+class UndoTest(unittest.TestCase):
+    """撤销上一步功能（扩展）。"""
+
+    def test_undo_restores_mistake_after_blocked_click(self):
+        game = make_game([(0, 0, "R"), (0, 3, "D")])
+        game.click(0, 0)   # 被阻挡，失误 -1
+        self.assertEqual(game.mistakes_left, MAX_MISTAKES - 1)
+        self.assertTrue(game.undo())
+        self.assertEqual(game.mistakes_left, MAX_MISTAKES)
+
+    def test_undo_restores_flown_arrow(self):
+        game = make_game([(0, 0, "R"), (0, 3, "D")])
+        game.click(0, 3)   # 飞出
+        self.assertNotIn((0, 3), game.board)
+        self.assertTrue(game.undo())
+        self.assertIn((0, 3), game.board)
+        self.assertEqual(game.remaining, 2)
+
+    def test_undo_on_empty_history_returns_false(self):
+        game = make_game([(0, 0, "R")])
+        self.assertFalse(game.undo())
+
+    def test_undo_restores_failed_status(self):
+        game = make_game([(0, 0, "R"), (0, 3, "D")], max_mistakes=1)
+        game.click(0, 0)   # 唯一一次失误耗尽 -> 失败
+        self.assertEqual(game.status, "failed")
+        game.undo()
+        self.assertEqual(game.status, "playing")
+        self.assertEqual(game.mistakes_left, 1)
+
+    def test_click_empty_cell_not_undoable(self):
+        game = make_game([(0, 0, "R")])
+        game.click(3, 3)
+        self.assertFalse(game.undo())   # 空格点击不产生历史
+
+    def test_restart_clears_history(self):
+        game = make_game([(0, 0, "R"), (0, 3, "D")])
+        game.click(0, 3)
+        game.restart()
+        self.assertFalse(game.undo())
+
+
+class GeneratorTest(unittest.TestCase):
+    """随机生成可通关关卡（扩展）。"""
+
+    def test_generated_levels_are_solvable(self):
+        for seed in range(20):
+            with self.subTest(seed=seed):
+                level = generate_random_level(count=14, rng=random.Random(seed))
+                self.assertEqual(len(level.arrows), 14)
+                order = solve(level)
+                self.assertIsNotNone(order, f"seed={seed} 生成的关卡不可解")
+                self.assertEqual(len(order), 14)
+
+    def test_generated_arrows_in_bounds_and_unique(self):
+        level = generate_random_level(count=18, rng=random.Random(42))
+        cells = [(a.row, a.col) for a in level.arrows]
+        self.assertEqual(len(cells), len(set(cells)))          # 不重叠
+        for r, c in cells:
+            self.assertTrue(0 <= r < 6 and 0 <= c < 6)         # 在网格内
+
+    def test_generator_rejects_too_many_arrows(self):
+        with self.assertRaises(ValueError):
+            generate_random_level(6, 6, count=37)
+
+    def test_generator_is_deterministic_with_seed(self):
+        a = generate_random_level(count=12, rng=random.Random(7))
+        b = generate_random_level(count=12, rng=random.Random(7))
+        self.assertEqual(a.arrows, b.arrows)
+
+
+class ScoreTest(unittest.TestCase):
+    """得分与星级（扩展）。"""
+
+    def test_score_rewards_faster_clear(self):
+        fast = compute_score(20, 0, 10, 0)
+        slow = compute_score(60, 0, 10, 0)
+        self.assertGreater(fast, slow)
+
+    def test_score_rewards_fewer_mistakes(self):
+        careful = compute_score(20, 0, 10, 0)
+        sloppy = compute_score(20, 2, 10, 0)
+        self.assertGreater(careful, sloppy)
+
+    def test_score_never_negative(self):
+        self.assertGreaterEqual(compute_score(9999, 2, 10, 10), 0)
+
+    def test_stars_for(self):
+        self.assertEqual(stars_for(0), 3)
+        self.assertEqual(stars_for(1), 2)
+        self.assertEqual(stars_for(2), 1)
+        self.assertEqual(stars_for(3), 1)   # 失败时也会给最低 1 星的下限
+
+    def test_score_keeps_mistake_bonus_floor(self):
+        # 时间奖励归零后，剩余失误奖励仍然保留（下限为失误奖励）
+        self.assertEqual(compute_score(9999, 2, 10, 10), 80)
 
 
 if __name__ == "__main__":

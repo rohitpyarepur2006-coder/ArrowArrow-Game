@@ -9,6 +9,7 @@
 - Game：一局游戏的状态机（点击、失误、重置）
 """
 
+import random
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -101,7 +102,13 @@ def solve(level: Level):
 
 
 class Game:
-    """一局游戏的逻辑状态。界面层（GameScene）负责调用 click/restart 并播放动画。"""
+    """一局游戏的逻辑状态。界面层（GameScene）负责调用 click/restart 并播放动画。
+
+    每次有效的点击（飞出或碰撞）前都会在 history 中压入一份状态快照，
+    供"撤销上一步"功能使用。
+    """
+
+    HISTORY_LIMIT = 200  # 撤销历史上限，防止内存无限增长
 
     def __init__(self, level: Level, max_mistakes: int = 3):
         self.level = level
@@ -113,6 +120,14 @@ class Game:
         self.board = self.level.to_board()
         self.mistakes_left = self.max_mistakes
         self.status = "playing"  # playing / cleared / failed
+        self.history = []
+
+    def restore(self, board: dict, mistakes_left: int, status: str = "playing"):
+        """从存档恢复一局游戏（用于继续游戏）。"""
+        self.board = board
+        self.mistakes_left = mistakes_left
+        self.status = status
+        self.history = []
 
     @property
     def remaining(self) -> int:
@@ -123,6 +138,10 @@ class Game:
         arrow = self.board.get((row, col))
         if arrow is None:
             return ClickResult(LaunchResult.NO_ARROW)
+        # 压入快照（深拷贝棋盘字典），供撤销使用
+        self.history.append((dict(self.board), self.mistakes_left, self.status))
+        if len(self.history) > self.HISTORY_LIMIT:
+            self.history.pop(0)
         blocker = find_blocker(self.board, arrow,
                                self.level.grid_rows, self.level.grid_cols)
         if blocker is not None:
@@ -138,9 +157,69 @@ class Game:
             self.status = "cleared"
         return ClickResult(LaunchResult.FLY_OUT, arrow=arrow)
 
+    def undo(self) -> bool:
+        """撤销上一步点击；无历史可撤销时返回 False。"""
+        if not self.history:
+            return False
+        self.board, self.mistakes_left, self.status = self.history.pop()
+        return True
+
     def next_hint(self):
         """提示：返回当前一步可以安全消除的箭头（无则返回 None）。"""
         free = [a for a in self.board.values()
                 if find_blocker(self.board, a,
                                 self.level.grid_rows, self.level.grid_cols) is None]
         return free[0] if free else None
+
+
+def compute_score(elapsed_seconds: float, mistakes_used: int,
+                  arrows_total: int, arrows_left: int,
+                  max_mistakes: int = 3) -> int:
+    """通关得分 = 消除数×50 + 时间奖励 + 剩余失误奖励（下限 0）。"""
+    cleared = arrows_total - arrows_left
+    time_bonus = max(0, 600 - int(elapsed_seconds) * 12)
+    mistake_bonus = (max_mistakes - mistakes_used) * 80
+    return max(0, cleared * 50 + time_bonus + mistake_bonus)
+
+
+def stars_for(mistakes_used: int) -> int:
+    """星级评价：0 失误 3 星，1 失误 2 星，2 失误 1 星（通关时最多失误 2 次）。"""
+    return max(1, 3 - mistakes_used)
+
+
+def generate_random_level(grid_rows: int = 6, grid_cols: int = 6,
+                          count: int = 12, rng: random.Random = None) -> Level:
+    """随机生成一个保证可通关的关卡。
+
+    算法（逆序放置）：按"消除顺序的逆序"逐支放置箭头。已放置的箭头都会
+    在本次放置的箭头之后才被消除，因此只要新箭头的正前方路径上没有已
+    放置的箭头，它就一定能在自己的回合飞出。放置完成时，放置顺序的
+    逆序就是一条可行的通关顺序。
+    """
+    rng = rng or random.Random()
+    if count > grid_rows * grid_cols:
+        raise ValueError("箭头数量超过网格容量")
+    placed = {}
+    occupied = set()
+    arrows = []
+    for _ in range(count):
+        cells = [(r, c) for r in range(grid_rows) for c in range(grid_cols)
+                 if (r, c) not in occupied]
+        rng.shuffle(cells)
+        chosen = None
+        for r, c in cells:
+            directions = [UP, DOWN, LEFT, RIGHT]
+            rng.shuffle(directions)
+            for d in directions:
+                arrow = Arrow(r, c, d)
+                if find_blocker(placed, arrow, grid_rows, grid_cols) is None:
+                    chosen = arrow
+                    break
+            if chosen is not None:
+                break
+        if chosen is None:  # 极端情况下没有可放置的位置，提前结束
+            break
+        arrows.append(chosen)
+        occupied.add((chosen.row, chosen.col))
+        placed[(chosen.row, chosen.col)] = chosen
+    return Level("无尽模式", grid_rows, grid_cols, arrows)
