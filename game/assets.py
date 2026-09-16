@@ -6,6 +6,7 @@
 
 import io
 import math
+import os
 import struct
 import wave
 
@@ -14,19 +15,46 @@ import pygame
 from game import config
 
 _FONT_CACHE = {}
-# 依次尝试常见中文字体（Windows 下 microsoftyahei 一定存在），避免渲染出方块
+# 其他平台使用 SysFont 依次尝试常见中文字体
 FONT_CANDIDATES = "microsoftyahei,msyh,simhei,dengxian,simsun"
+
+# Windows 上 pygame 2.6 的 SysFont 字体枚举存在 bug：读取注册表字体信息时
+# 遇到非字符串值会抛 TypeError（见 pygame/sysfont.py 的 initsysfonts_win32），
+# 导致中文字体加载失败、文字渲染成豆腐块。因此 Windows 下直接按路径加载
+# 字体文件，绕过注册表枚举：
+_WINDOWS_FONT_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"   # 微软雅黑 Bold
+_WINDOWS_FONT_NORMAL = r"C:\Windows\Fonts\msyh.ttc"   # 微软雅黑
+_WINDOWS_FONT_FALLBACK = r"C:\Windows\Fonts\simhei.ttf"  # 黑体（备选）
+
+
+def _load_windows_font(size: int, bold: bool):
+    """按路径加载 Windows 中文字体；加载失败返回 None。"""
+    # 粗体优先使用微软雅黑 Bold 字体文件，否则加载普通字体后由 SDL_ttf 合成粗体
+    candidates = [(_WINDOWS_FONT_BOLD, False)] if bold else []
+    candidates += [(_WINDOWS_FONT_NORMAL, bold), (_WINDOWS_FONT_FALLBACK, bold)]
+    for path, synthesize in candidates:
+        if os.path.exists(path):
+            try:
+                font = pygame.font.Font(path, size)
+                font.set_bold(synthesize)
+                return font
+            except Exception:
+                continue
+    return None
 
 
 def get_font(size: int, bold: bool = False) -> pygame.font.Font:
-    """带缓存的中文字体。"""
+    """带缓存的中文字体。Windows 直接按路径加载，其他平台走 SysFont。"""
     key = (size, bold)
     font = _FONT_CACHE.get(key)
     if font is None:
-        try:
-            font = pygame.font.SysFont(FONT_CANDIDATES, size, bold=bold)
-        except Exception:
-            font = pygame.font.Font(None, size)
+        if os.name == "nt":
+            font = _load_windows_font(size, bold)
+        if font is None:
+            try:
+                font = pygame.font.SysFont(FONT_CANDIDATES, size, bold=bold)
+            except Exception:
+                font = pygame.font.Font(None, size)
         _FONT_CACHE[key] = font
     return font
 
@@ -59,8 +87,9 @@ _ARROW_CACHE = {}
 def draw_arrow(surface, center, direction, size, color, alpha=255):
     """在 center 处绘制一支指向 direction 的箭头。
 
-    实现方式：先画一支朝右的箭头底图，再按方向旋转（右 0° / 下 90° /
-    左 180° / 上 270°），旋转结果带缓存。
+    实现方式：先画一支朝右的箭头底图，再按方向旋转。注意 pygame 的
+    rotate 正角度为屏幕顺时针方向（已验证），因此映射为：
+    右 0° / 上 90° / 左 180° / 下 270°，旋转结果带缓存。
     """
     key = (size, color, direction)
     rotated = _ARROW_CACHE.get(key)
@@ -77,7 +106,7 @@ def draw_arrow(surface, center, direction, size, color, alpha=255):
         pygame.draw.polygon(base, (30, 40, 55, 90), shadow)  # 右下投影
         pygame.draw.polygon(base, (*color, 255), points)
         pygame.draw.polygon(base, (*_darken(color, 45), 255), points, 2)
-        angle = {(-1, 0): 270, (1, 0): 90, (0, -1): 180, (0, 1): 0}[direction]
+        angle = {(-1, 0): 90, (1, 0): 270, (0, -1): 180, (0, 1): 0}[direction]
         rotated = pygame.transform.rotate(base, angle)
         _ARROW_CACHE[key] = rotated
 
