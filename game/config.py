@@ -1,8 +1,8 @@
 """全局配置：窗口、棋盘、颜色与动画参数。"""
 
 # ---------- 窗口 ----------
-WINDOW_WIDTH = 760
-WINDOW_HEIGHT = 700
+WINDOW_WIDTH = 900
+WINDOW_HEIGHT = 780
 FPS = 60
 TITLE = "一箭又一箭"
 
