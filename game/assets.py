@@ -84,12 +84,13 @@ def _darken(color, amount):
 _ARROW_CACHE = {}
 
 
-def draw_arrow(surface, center, direction, size, color, alpha=255):
+def draw_arrow(surface, center, direction, size, color, alpha=255, angle_offset=0.0):
     """在 center 处绘制一支指向 direction 的箭头。
 
     实现方式：先画一支朝右的箭头底图，再按方向旋转。注意 pygame 的
     rotate 正角度为屏幕顺时针方向（已验证），因此映射为：
     右 0° / 上 90° / 左 180° / 下 270°，旋转结果带缓存。
+    angle_offset 为附加的瞬时旋转角（用于碰撞晃动时的小幅摇摆）。
     """
     key = (size, color, direction)
     rotated = _ARROW_CACHE.get(key)
@@ -110,9 +111,12 @@ def draw_arrow(surface, center, direction, size, color, alpha=255):
         rotated = pygame.transform.rotate(base, angle)
         _ARROW_CACHE[key] = rotated
 
-    if alpha != 255:
+    if angle_offset or alpha != 255:
         rotated = rotated.copy()
-        rotated.set_alpha(alpha)
+        if angle_offset:
+            rotated = pygame.transform.rotate(rotated, angle_offset)
+        if alpha != 255:
+            rotated.set_alpha(alpha)
     surface.blit(rotated, rotated.get_rect(center=center))
 
 

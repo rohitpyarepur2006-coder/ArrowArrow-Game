@@ -64,7 +64,7 @@ class FlyingArrow:
 
 
 class Collision:
-    """碰撞特效：箭头原地晃动 + 红色闪烁。"""
+    """碰撞特效：箭头原地晃动 + 摇摆 + 红色闪烁（闪烁在箭头下层）。"""
 
     def __init__(self, arrow, cell_rect):
         self.arrow = arrow
@@ -83,30 +83,38 @@ class Collision:
     def offset(self):
         # 正弦晃动，振幅随时间衰减
         k = self.t / self.duration
-        return math.sin(self.t * 55) * 5 * (1 - k)
+        return math.sin(self.t * 55) * 7 * (1 - k)
+
+    @property
+    def angle(self):
+        # 小幅摇摆，增强"撞上东西"的感觉
+        k = self.t / self.duration
+        return math.sin(self.t * 40) * 10 * (1 - k)
 
     def draw(self, surface):
+        # 前 0.22 秒红色闪烁，画在箭头下层：箭头始终保持清晰可见，
+        # 不会因为被红色盖住而看起来像"消失"
+        flash = max(0.0, 1 - self.t / 0.22)
+        if flash > 0:
+            overlay = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+            overlay.fill((231, 76, 60, int(150 * flash)))
+            surface.blit(overlay, self.rect)
         color = config.ARROW_COLORS[self.arrow.direction]
         center = (self.rect.centerx + self.offset, self.rect.centery)
         draw_arrow(surface, center, self.arrow.direction,
-                   int(config.CELL * 0.66), color)
-        # 前 0.18 秒在箭头上叠加红色闪烁
-        flash = max(0.0, 1 - self.t / 0.18)
-        if flash > 0:
-            overlay = pygame.Surface(self.rect.size, pygame.SRCALPHA)
-            overlay.fill((231, 76, 60, int(95 * flash)))
-            surface.blit(overlay, self.rect)
+                   int(config.CELL * 0.66), color, angle_offset=self.angle)
 
 
 class FloatText:
     """向上漂浮并淡出的提示文字（如"被阻挡！"）。"""
 
-    def __init__(self, text, start_center, color, seconds=0.9):
+    def __init__(self, text, start_center, color, seconds=1.0, font_size=22):
         self.text = text
         self.pos = pygame.Vector2(start_center)
         self.color = color
         self.t = 0.0
         self.seconds = seconds
+        self.font_size = font_size
 
     @property
     def done(self):
@@ -114,11 +122,11 @@ class FloatText:
 
     def update(self, dt):
         self.t += dt
-        self.pos.y -= 34 * dt
+        self.pos.y -= 30 * dt
 
     def draw(self, surface):
         k = self.t / self.seconds
-        img = get_font(22, True).render(self.text, True, self.color)
+        img = get_font(self.font_size, True).render(self.text, True, self.color)
         img.set_alpha(int(255 * (1 - k)))
         surface.blit(img, img.get_rect(center=self.pos))
 
@@ -322,7 +330,8 @@ class GameScene:
             rect = self.cell_rect(*cell)
             self.collisions[cell] = Collision(result.arrow, rect)
             self.blocker_ring = (self.cell_rect(result.blocker.row, result.blocker.col), 0.0)
-            self.float_texts.append(FloatText("被阻挡！", rect.center, config.DANGER))
+            self.float_texts.append(FloatText("被阻挡！", rect.center, config.DANGER,
+                                              font_size=28))
             if self.game.status == "failed":
                 self._schedule("failed")
         else:  # FLY_OUT
@@ -419,10 +428,11 @@ class GameScene:
                                config.ARROW_COLORS[arrow.direction])
 
     def _draw_rings(self, surface):
-        # 碰撞瞬间圈出阻挡箭头（橙色，0.4 秒）
-        if self.blocker_ring and self.blocker_ring[1] < 0.4:
-            rect, _ = self.blocker_ring
-            pygame.draw.rect(surface, config.ORANGE, rect.inflate(8, 8), 3,
+        # 碰撞瞬间圈出阻挡箭头（橙色脉动圆环，0.6 秒）
+        if self.blocker_ring and self.blocker_ring[1] < 0.6:
+            rect, t = self.blocker_ring
+            grow = 8 + 3 * math.sin(t * 22)
+            pygame.draw.rect(surface, config.ORANGE, rect.inflate(grow, grow), 3,
                              border_radius=12)
         # 提示高亮：金色呼吸圆环
         if self.hint:
